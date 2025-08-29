@@ -1,78 +1,43 @@
+document.getElementById('printBtn').addEventListener('click', function () {
+  const { jsPDF } = window.jspdf;
 
-  (function () {
-    var btn = document.getElementById('printBtn');
-    if (!btn) return;
+  // Exportar imagen del canvas
+  var dataUrl = canvas.toDataURL("image/png");
 
-    btn.addEventListener('click', function (e) {
-      // interceptamos para aplicar filtro si corresponde
-      e.preventDefault && e.preventDefault();
-      // evitar que otros handlers se ejecuten (si existieran)
-      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-      if (e.stopPropagation) e.stopPropagation();
+  // Crear PDF tamaño carta (Letter)
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "pt",
+    format: "letter" // 612 x 792 pt
+  });
 
-      var applyGray = !!document.getElementById('gray').checked;
+  const pageWidth = pdf.internal.pageSize.getWidth();
 
-      // Obtener la imagen del canvas (snapshot)
-      // Usamos el toDataURL del objeto fabric (funciona igual que canvas DOM)
-      var dataUrl = canvas.toDataURL({ format: 'png' });
+  // insertamos imagen escalada al ancho
+  pdf.addImage(dataUrl, "PNG", 0, 0, pageWidth, 0);
 
-      // Abrir ventana inmediatamente para evitar popup-blockers
-      var printWin = window.open('', '_blank');
-      if (!printWin) {
-        alert('El navegador bloqueó la ventana de impresión. Permite popups para este sitio e inténtalo de nuevo.');
-        return;
-      }
+  // Generar blob
+  const pdfBlob = pdf.output("blob");
+  const pdfUrl = URL.createObjectURL(pdfBlob);
 
-      // Función que escribe y dispara print en la ventana abierta
-      function writeAndPrint(finalDataUrl) {
-        var towrite = '<html>' +
-          '<head><title>Imprimir</title></head>' +
-          '<body style="margin:0; display:flex; justify-content:center; align-items:center;">' +
-          '<img src="' + finalDataUrl + '" style="width:100%; height:auto;" />' +
-          '<script>' +
-            'window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; };' +
-          '<\/script>' +
-          '</body>' +
-          '</html>';
+  // 1️⃣ Abrir en nueva pestaña (preview para el usuario)
+ // window.open(pdfUrl, "_blank");
 
-        printWin.document.open();
-        printWin.document.write(towrite);
-        printWin.document.close();
-      }
+  // 2️⃣ (Opcional) Intentar imprimir automáticamente con iframe oculto
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "absolute";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "none";
+  iframe.src = pdfUrl;
+  document.body.appendChild(iframe);
 
-      // Si NO hay que aplicar gris, imprimimos directo
-      if (!applyGray) {
-        writeAndPrint(dataUrl);
-        return;
-      }
-
-      // Si hay que aplicar gris, dibujamos en un canvas offscreen con ctx.filter
-      var img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = function () {
-        try {
-          var off = document.createElement('canvas');
-          off.width = img.width;
-          off.height = img.height;
-          var ctx = off.getContext('2d');
-
-          // aplicar filtro global antes de dibujar
-          ctx.filter = 'grayscale(100%)';
-          ctx.drawImage(img, 0, 0, off.width, off.height);
-
-          var grayData = off.toDataURL('image/png');
-          writeAndPrint(grayData);
-        } catch (err) {
-          // fallback: si algo falla (por CORS raro), imprimimos el original
-          console.error('Error aplicando filtro gris:', err);
-          writeAndPrint(dataUrl);
-        }
-      };
-      img.onerror = function () {
-        // si no carga la imagen por alguna razón, imprimimos original
-        writeAndPrint(dataUrl);
-      };
-      img.src = dataUrl;
-
-    }, true); // use capture true para interceptar antes que otros listeners si los hay
-  })();
+  iframe.onload = function () {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch (err) {
+      console.error("No se pudo imprimir automáticamente:", err);
+    }
+  };
+});
