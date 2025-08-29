@@ -73,15 +73,19 @@
             /* bloquea gestos de zoom/pan en móviles si quieres */
         }
     </style>
+    <link rel="shortcut icon" href="./favicon.png" type="image/x-icon">
+
 </head>
 
 <body>
     <div class="toolbar">
+
         <label>Frontal: <input type="file" id="frontInput" accept="image/*"></label>
         <label>Trasera: <input type="file" id="backInput" accept="image/*"></label>
         <label><input type="checkbox" id="scale150" checked> Aumentar 150%</label>
         <label><input type="checkbox" id="gray" checked> Escala de grises</label>
         <button id="printBtn">Imprimir</button>
+
     </div>
 
     <div class="root" style="position: relative;">
@@ -122,7 +126,7 @@
             const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
 
-            const targetWidth = scale150 ? CARD_W_REAL * 1.5 * (isTouchDevice ? 985 / 875 : 1) : CARD_W_REAL* (isTouchDevice ? 985 / 875 : 1);
+            const targetWidth = scale150 ? CARD_W_REAL * 1.5 * (isTouchDevice ? 9 / 8 : 1) : CARD_W_REAL * (isTouchDevice ? 9 / 8 : 1);
             img.scaleToWidth(targetWidth);
 
 
