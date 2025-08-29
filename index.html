@@ -3,7 +3,9 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0"> -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+
     <title>Fotocopia Opcional</title>
     <style>
         body {
@@ -54,6 +56,22 @@
         button:hover {
             background: #4cd137;
         }
+
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0);
+            /* completamente transparente */
+            z-index: 10;
+            /* por encima del canvas */
+
+
+            /* bloquea gestos de zoom/pan en móviles si quieres */
+        }
     </style>
 </head>
 
@@ -62,24 +80,26 @@
         <label>Frontal: <input type="file" id="frontInput" accept="image/*"></label>
         <label>Trasera: <input type="file" id="backInput" accept="image/*"></label>
         <label><input type="checkbox" id="scale150" checked> Aumentar 150%</label>
-        <label><input type="checkbox" id="gray"> Escala de grises</label>
+        <label><input type="checkbox" id="gray" checked> Escala de grises</label>
         <button id="printBtn">Imprimir</button>
     </div>
 
-    <div class="root">
+    <div class="root" style="position: relative;">
         <canvas id="c" width="816" height="1056"></canvas>
+        <div id="overlay"></div>
     </div>
+
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
     <script>
         const canvas = new fabric.Canvas('c', {
             backgroundColor: 'white',
-            selection: true
+            selection: false
         });
 
         const cmToPx = cm => cm * 96 / 2.54;
         const CARD_W_REAL = cmToPx(8.5); // tamaño real en px
-        debugger
+
         const GAP_PX = cmToPx(1.5);      // espacio entre imágenes
 
         let frontImg, backImg;
@@ -99,7 +119,10 @@
                 hasControls: true
             });
 
-            const targetWidth = scale150 ? CARD_W_REAL * 1.5 : CARD_W_REAL;
+            const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+
+            const targetWidth = scale150 ? CARD_W_REAL * 1.5 * (isTouchDevice ? 985 / 875 : 1) : CARD_W_REAL* (isTouchDevice ? 985 / 875 : 1);
             img.scaleToWidth(targetWidth);
 
 

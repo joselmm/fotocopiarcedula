@@ -25,15 +25,35 @@
 
     // Función que escribe y dispara print en la ventana abierta
     function writeAndPrint(finalDataUrl) {
-      var towrite = '<html>' +
-        '<head><title>Imprimir</title></head>' +
-        '<body style="margin:0; display:flex; justify-content:center; align-items:center;">' +
-        '<img src="' + finalDataUrl + '" style="width:100%; height:auto;" />' +
-        '<script>' +
-        'window.onload = function(){ window.print(); window.onafterprint = function(){ window.close(); }; };' +
-        '<\/script>' +
-        '</body>' +
-        '</html>';
+      var towrite  =
+        '<html>' +
+  '<head>' +
+    '<title>Imprimir</title>' +
+    '<style>' +
+      /* Reset / normalizer */
+      '* { margin: 0; padding: 0; box-sizing: border-box; }' +
+      
+      '#printBtn {' +
+        'font-size: 24px;' +
+        'padding: 20px 40px;' +
+        'cursor: pointer;' +
+        'border: none;' +
+        'border-radius: 8px;' +
+        'background-color: #007bff;' +
+        'color: white;' +
+        'display: block;' +  // quita margen de bloque por defecto
+      '}' +
+      
+      '@media print { #printBtn { display: none; } }' +  // oculta el botón al imprimir
+    '</style>' +
+  '</head>' +
+  '<body style="margin:0; display:flex; flex-direction:column; align-items:center;">' +
+    '<button id="printBtn" onclick="window.print()">Imprimir</button>' +
+    '<img src="' + finalDataUrl + '" style="width:100%; height:auto;" />' +
+  '</body>' +
+'</html>';
+
+
 
       printWin.document.open();
       printWin.document.write(towrite);
@@ -74,5 +94,5 @@
     };
     img.src = dataUrl;
 
-  }, true); // use capture true para interceptar antes que otros listeners si los hay
+  }); // use capture true para interceptar antes que otros listeners si los hay
 })();
