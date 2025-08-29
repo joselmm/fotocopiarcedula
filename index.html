@@ -158,10 +158,212 @@
         });
 
 
-        
+
 
     </script>
-    <script src="./js/print.js"></script>
+    <!-- CDN jsPDF - añadir si no está ya -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- Botón PDF (opcional: puedes añadir este botón en la toolbar) -->
+    <!-- <button id="pdfBtn">Generar PDF</button> -->
+
+    <script>
+        (function () {
+            // CONFIG
+            const PDF_WIDTH_IN = 8.5;
+            const PDF_HEIGHT_IN = 11;
+
+            // Usa un multiplicador para aumentar la resolución de la imagen que va al PDF.
+            // 1 => equivalente a tu canvas 816x1056 (96dpi -> carta).
+            // 2 o 3 mejora nitidez en la impresión.
+            const DEFAULT_MULTIPLIER = 2;
+
+            // main function: genera PDF y lo abre en modal con iframe
+            async function generatePdfAndShow(options = { applyGray: false, multiplier: DEFAULT_MULTIPLIER }) {
+                try {
+                    // 1. snapshot del canvas (fabric)
+                    // Si quieres más resolución: usa canvas.toDataURL({ multiplier: n })
+                    const dataUrl = canvas.toDataURL({ format: 'png', multiplier: options.multiplier || 1 });
+
+                    // 2. si hay que aplicar grayscale, creare versión procesada con offscreen canvas
+                    const finalDataUrl = await (options.applyGray ? applyGrayFilterToDataUrl(dataUrl) : Promise.resolve(dataUrl));
+
+                    // 3. crear PDF (letter, unidades en pulgadas)
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({ unit: 'in', format: 'letter', compress: true });
+
+                    // 4. insertar imagen en tamaño carta (8.5 x 11 pulgadas)
+                    // La imagen será escalada para cubrir la página entera.
+                    pdf.addImage(finalDataUrl, 'PNG', 0, 0, PDF_WIDTH_IN, PDF_HEIGHT_IN);
+
+                    // 5. obtener blob y crear URL
+                    const blob = pdf.output('blob');
+                    const blobUrl = URL.createObjectURL(blob);
+
+                    // 6. abrir modal con iframe y controles
+                    openPdfModal(blobUrl);
+
+                } catch (err) {
+                    console.error('Error generando PDF:', err);
+                    alert('Error al generar el PDF. Revisa la consola.');
+                }
+            }
+
+            // Dibuja la dataURL en un offscreen canvas con filter grayscale y devuelve el nuevo dataURL
+            function applyGrayFilterToDataUrl(srcDataUrl) {
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = function () {
+                        try {
+                            const off = document.createElement('canvas');
+                            off.width = img.width;
+                            off.height = img.height;
+                            const ctx = off.getContext('2d');
+
+                            // aplicar filtro global y dibujar
+                            ctx.filter = 'grayscale(100%)';
+                            ctx.drawImage(img, 0, 0, off.width, off.height);
+
+                            const out = off.toDataURL('image/png');
+                            resolve(out);
+                        } catch (e) {
+                            console.error('applyGrayFilterToDataUrl error:', e);
+                            // fallback: devolver la original
+                            resolve(srcDataUrl);
+                        }
+                    };
+                    img.onerror = function () {
+                        // fallback si no carga
+                        resolve(srcDataUrl);
+                    };
+                    img.src = srcDataUrl;
+                });
+            }
+
+            // Crea modal + iframe + botones. Al cerrar revoca blob URL.
+            function openPdfModal(blobUrl) {
+                // overlay
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.left = '0';
+                overlay.style.top = '0';
+                overlay.style.width = '100vw';
+                overlay.style.height = '100vh';
+                overlay.style.background = 'rgba(0,0,0,0.45)';
+                overlay.style.display = 'flex';
+                overlay.style.alignItems = 'center';
+                overlay.style.justifyContent = 'center';
+                overlay.style.zIndex = 999999;
+
+                // modal container
+                const modal = document.createElement('div');
+                modal.style.width = '90vw';
+                modal.style.maxWidth = '1200px';
+                modal.style.height = '90vh';
+                modal.style.background = '#fff';
+                modal.style.borderRadius = '8px';
+                modal.style.overflow = 'hidden';
+                modal.style.display = 'flex';
+                modal.style.flexDirection = 'column';
+                modal.style.boxShadow = '0 10px 40px rgba(0,0,0,0.25)';
+
+                // header with buttons
+                const header = document.createElement('div');
+                header.style.display = 'flex';
+                header.style.justifyContent = 'flex-end';
+                header.style.padding = '8px';
+                header.style.gap = '8px';
+                header.style.background = '#f6f6f6';
+
+                const btnPrint = document.createElement('button');
+                btnPrint.textContent = 'Imprimir';
+                btnPrint.style.padding = '8px 12px';
+                btnPrint.style.cursor = 'pointer';
+
+                const btnClose = document.createElement('button');
+                btnClose.textContent = 'Cerrar';
+                btnClose.style.padding = '8px 12px';
+                btnClose.style.cursor = 'pointer';
+
+                header.appendChild(btnPrint);
+                header.appendChild(btnClose);
+
+                // iframe area
+                const iframeWrap = document.createElement('div');
+                iframeWrap.style.flex = '1 1 auto';
+                iframeWrap.style.background = '#e9e9e9';
+
+                const iframe = document.createElement('iframe');
+                iframe.src = blobUrl;
+                iframe.style.width = '100%';
+                iframe.style.height = '100%';
+                iframe.style.border = 'none';
+
+                iframeWrap.appendChild(iframe);
+                modal.appendChild(header);
+                modal.appendChild(iframeWrap);
+                overlay.appendChild(modal);
+                document.body.appendChild(overlay);
+
+                // handlers
+                btnClose.addEventListener('click', () => {
+                    try { iframe.src = 'about:blank'; } catch (e) { }
+                    document.body.removeChild(overlay);
+                    URL.revokeObjectURL(blobUrl);
+                });
+
+                btnPrint.addEventListener('click', () => {
+                    try {
+                        // Enfocar iframe y lanzar print
+                        iframe.contentWindow.focus();
+                        iframe.contentWindow.print();
+                    } catch (err) {
+                        console.error('Error imprimiendo desde iframe:', err);
+                        // fallback: abrir en nueva pestaña
+                        window.open(blobUrl, '_blank');
+                    }
+                });
+
+                // Auto-focus
+                setTimeout(() => iframe.focus(), 200);
+            }
+
+            // Hook: botón PDF (si quieres usar el mismo printBtn cambia id)
+            // Aquí usamos un botón nuevo si existe, sino usamos printBtn como fallback.
+            function attachHandlerToButtons() {
+                const btnPdf = document.getElementById('pdfBtn');
+                const mainBtn = document.getElementById('printBtn');
+
+                const handler = () => {
+                    const applyGray = !!document.getElementById('gray').checked;
+                    // si quieres mayor resolución en el PDF, cambia multiplier (ej. 2 o 3)
+                    const multiplier = 2; // recomendado 2 para mejor nitidez
+                    generatePdfAndShow({ applyGray, multiplier });
+                };
+
+                if (btnPdf) btnPdf.addEventListener('click', handler);
+                else if (mainBtn) {
+                    // si no hay boton pdf, puedes usar el printBtn para abrir PDF en modal
+                    // pero ojo: si printBtn ya tiene otro handler que quieres mantener, crea pdfBtn en tu HTML
+                    mainBtn.addEventListener('click', function (ev) {
+                        // evitar ejecutar otros handlers del printBtn (si quieres que PDF reemplace):
+                        ev.preventDefault && ev.preventDefault();
+                        ev.stopImmediatePropagation && ev.stopImmediatePropagation();
+                        handler();
+                    }, true);
+                }
+            }
+
+            // init
+            attachHandlerToButtons();
+
+            // expose for debug if needed
+            window.generatePdfAndShow = generatePdfAndShow;
+        })();
+    </script>
+
+    <!-- <script src="./js/print.js"></script> -->
 </body>
 
-</html>
+</html>>
