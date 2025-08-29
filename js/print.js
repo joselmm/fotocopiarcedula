@@ -30,28 +30,20 @@
   '<head>' +
     '<title>Imprimir</title>' +
     '<style>' +
-      /* Reset / normalizer */
       '* { margin: 0; padding: 0; box-sizing: border-box; }' +
-      
-      '#printBtn {' +
-        'font-size: 24px;' +
-        'padding: 20px 40px;' +
-        'cursor: pointer;' +
-        'border: none;' +
-        'border-radius: 8px;' +
-        'background-color: #007bff;' +
-        'color: white;' +
-        'display: block;' +  // quita margen de bloque por defecto
-      '}' +
-      
-      '@media print { #printBtn { display: none; } }' +  // oculta el botón al imprimir
+      '#printBtn { font-size: 24px; padding: 20px 40px; cursor: pointer; border: none; border-radius: 8px; background-color: #007bff; color: white; display: block; }' +
+      '@media print { #printBtn { display: none; } }' +
     '</style>' +
   '</head>' +
   '<body style="margin:0; display:flex; flex-direction:column; align-items:center;">' +
-    '<button id="printBtn" onclick="window.print()">Imprimir</button>' +
+        '<button id="printBtn" onclick="window.print()">Imprimir</button>' +
     '<img src="' + finalDataUrl + '" style="width:100%; height:auto;" />' +
+    '<script>' +
+      'document.getElementById("printBtn").click();' + // dispara el click automáticamente
+    '</script>' +
   '</body>' +
 '</html>';
+
 
 
 
