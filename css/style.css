@@ -1,0 +1,14 @@
+*{
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+}
+
+body .root{
+    background-color: black;
+    height: auto;
+    max-width: 100dvw;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}

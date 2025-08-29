@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fotocopia Opcional</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f6fa;
+            margin: 0;
+            padding: 0;
+        }
+
+        .toolbar {
+            background: #2f3640;
+            color: white;
+            padding: 10px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toolbar label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 14px;
+        }
+
+        .root {
+            display: flex;
+            justify-content: center;
+            margin-top: 10px;
+        }
+
+        canvas {
+            border: 1px solid #ccc;
+        }
+
+        button {
+            background: #44bd32;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #4cd137;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="toolbar">
+        <label>Frontal: <input type="file" id="frontInput" accept="image/*"></label>
+        <label>Trasera: <input type="file" id="backInput" accept="image/*"></label>
+        <label><input type="checkbox" id="scale150" checked> Aumentar 150%</label>
+        <label><input type="checkbox" id="gray"> Escala de grises</label>
+        <button id="printBtn">Imprimir</button>
+    </div>
+
+    <div class="root">
+        <canvas id="c" width="816" height="1056"></canvas>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+    <script>
+        const canvas = new fabric.Canvas('c', {
+            backgroundColor: 'white',
+            selection: true
+        });
+
+        const cmToPx = cm => cm * 96 / 2.54;
+        const CARD_W_REAL = cmToPx(8.5); // tamaño real en px
+        debugger
+        const GAP_PX = cmToPx(1.5);      // espacio entre imágenes
+
+        let frontImg, backImg;
+
+        function prepare(img, scale150, gray) {
+            /* if (gray) {
+                const g = new fabric.Image.filters.Grayscale();
+                img.filters = [g];
+                img.applyFilters();
+            } */
+            if (img.height > img.width) img.set({ angle: -90 });
+
+            img.set({
+                originX: 'center',
+                originY: 'center',
+                selectable: true,
+                hasControls: true
+            });
+
+            const targetWidth = scale150 ? CARD_W_REAL * 1.5 : CARD_W_REAL;
+            img.scaleToWidth(targetWidth);
+
+
+
+            img.setCoords();
+            return img;
+        }
+
+        function placeBoth() {
+            if (!frontImg || !backImg) return;
+
+            const h1 = frontImg.getScaledHeight();
+            const h2 = backImg.getScaledHeight();
+            const total = h1 + GAP_PX + h2;
+
+            const cx = canvas.width / 2;
+            const startY = (canvas.height - total) / 2;
+
+            frontImg.set({ left: cx, top: startY + h1 / 2 });
+            backImg.set({ left: cx, top: startY + h1 + GAP_PX + h2 / 2 });
+
+            frontImg.setCoords();
+            backImg.setCoords();
+            canvas.renderAll();
+        }
+
+        function loadImage(file, isFront) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                fabric.Image.fromURL(e.target.result, img => {
+                    const scale150 = document.getElementById('scale150').checked;
+                    const gray = document.getElementById('gray').checked;
+                    img = prepare(img, scale150, gray);
+
+                    if (isFront) {
+                        if (frontImg) canvas.remove(frontImg);
+                        frontImg = img;
+                    } else {
+                        if (backImg) canvas.remove(backImg);
+                        backImg = img;
+                    }
+
+                    canvas.add(img);
+                    placeBoth();
+                });
+            };
+            reader.readAsDataURL(file);
+        }
+
+        document.getElementById('frontInput').addEventListener('change', e => {
+            if (e.target.files[0]) loadImage(e.target.files[0], true);
+        });
+
+        document.getElementById('backInput').addEventListener('change', e => {
+            if (e.target.files[0]) loadImage(e.target.files[0], false);
+        });
+
+
+        
+
+    </script>
+    <script src="./js/print.js"></script>
+</body>
+
+</html>
