@@ -2,197 +2,377 @@
 <html lang="es">
 
 <head>
-    <meta charset="UTF-8">
-    <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0"> -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 
-    <title>Fotocopia Opcional</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f5f6fa;
-            margin: 0;
-            padding: 0;
-        }
-
-        .toolbar {
-            background: #2f3640;
-            color: white;
-            padding: 10px;
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .toolbar label {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 14px;
-        }
-
-        .root {
-            display: flex;
-            justify-content: center;
-            margin-top: 10px;
-        }
-
-        canvas {
-            border: 1px solid #ccc;
-        }
-
-        button {
-            background: #44bd32;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s;
-        }
-
-        button:hover {
-            background: #4cd137;
-        }
-
-
-        #overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(255, 255, 255, 0);
-            /* completamente transparente */
-            z-index: 10;
-            /* por encima del canvas */
-
-
-            /* bloquea gestos de zoom/pan en móviles si quieres */
-        }
-    </style>
-    <link rel="shortcut icon" href="./favicon.png" type="image/x-icon">
-
+  <title>Fotocopia Opcional</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f6fa;
+      margin: 0; padding: 0;
+    }
+    .toolbar {
+      background: #2f3640;
+      color: white;
+      padding: 10px;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      justify-content: center;
+    }
+    .toolbar label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 14px;
+    }
+    .root {
+      display: flex;
+      justify-content: center;
+      margin-top: 10px;
+    }
+    canvas {
+      border: 1px solid #ccc;
+    }
+    button {
+      background: #44bd32;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #4cd137;
+    }
+    #overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(255, 255, 255, 0);
+      z-index: 10; /* por encima del canvas */
+    }
+  </style>
+  <link rel="shortcut icon" href="./favicon.png" type="image/x-icon">
 </head>
 
 <body>
-    <div class="toolbar">
+  <div class="toolbar">
+    <label>Frontal: <input type="file" id="frontInput" accept="image/*"></label>
+    <label>Trasera: <input type="file" id="backInput" accept="image/*"></label>
+    <label><input checked type="checkbox" id="cropCheckbox"> Recortar cédula</label>
+    <label><input type="checkbox" id="scale150" checked> Aumentar 150%</label>
+    <label><input type="checkbox" id="gray" checked> Escala de grises</label>
+    <button id="printBtn">Imprimir</button>
+  </div>
 
-        <label>Frontal: <input type="file" id="frontInput" accept="image/*"></label>
-        <label>Trasera: <input type="file" id="backInput" accept="image/*"></label>
-        <label><input type="checkbox" id="scale150" checked> Aumentar 150%</label>
-        <label><input type="checkbox" id="gray" checked> Escala de grises</label>
-        <button id="printBtn">Imprimir</button>
+  <div class="root" style="position: relative;">
+    <canvas id="c" width="816" height="1056"></canvas>
+    <div id="overlay"></div>
+  </div>
 
-    </div>
+  <!-- Dependencias de FabricJS y ONNX Runtime -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+  <script>
+    const canvas = new fabric.Canvas('c', { backgroundColor: 'white', selection: false });
+    const cmToPx = cm => cm * 96 / 2.54;
+    const CARD_W_REAL = cmToPx(8.5);
+    const GAP_PX = cmToPx(1.5);
+    let frontImg, backImg;
+    let onnxSession = null;
+    const MODEL_PATH = 'models/mejor hasta ahora.onnx';
+    const MODEL_SIZE = 1024;
 
-    <div class="root" style="position: relative;">
-        <canvas id="c" width="816" height="1056"></canvas>
-        <div id="overlay"></div>
-    </div>
+    // Cargar modelo ONNX al iniciar
+    ort.InferenceSession.create(MODEL_PATH).then(sess => {
+      onnxSession = sess;
+      console.log('ONNX model loaded');
+    }).catch(err => {
+      console.error('Error loading ONNX model:', err);
+    });
 
+    function prepare(img, scale150, gray) {
+      if (img.height > img.width) img.set({ angle: -90 });
+      img.set({ originX: 'center', originY: 'center', selectable: true, hasControls: true });
+      const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const targetWidth = scale150
+        ? CARD_W_REAL * 1.5 * (isTouchDevice ? 9/8 : 1)
+        : CARD_W_REAL * (isTouchDevice ? 9/8 : 1);
+      img.scaleToWidth(targetWidth);
+      img.setCoords();
+      return img;
+    }
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
-    <script>
-        const canvas = new fabric.Canvas('c', {
-            backgroundColor: 'white',
-            selection: false
-        });
+    function placeBoth() {
+      if (!frontImg || !backImg) return;
+      const h1 = frontImg.getScaledHeight();
+      const h2 = backImg.getScaledHeight();
+      const total = h1 + GAP_PX + h2;
+      const cx = canvas.width / 2;
+      const startY = (canvas.height - total) / 2;
+      frontImg.set({ left: cx, top: startY + h1/2 });
+      backImg.set({ left: cx, top: startY + h1 + GAP_PX + h2/2 });
+      frontImg.setCoords();
+      backImg.setCoords();
+      canvas.renderAll();
+    }
 
-        const cmToPx = cm => cm * 96 / 2.54;
-        const CARD_W_REAL = cmToPx(8.5); // tamaño real en px
+    // Funciones de preprocesamiento y recorte (adaptadas del primer HTML)
+    function letterboxToModel(img, modelSize) {
+      const mCanvas = document.createElement('canvas');
+      mCanvas.width = modelSize; mCanvas.height = modelSize;
+      const mctx = mCanvas.getContext('2d');
+      mctx.fillStyle = 'rgb(114,114,114)'; mctx.fillRect(0,0,modelSize,modelSize);
+      const scale = Math.min(modelSize / img.width, modelSize / img.height);
+      const newW = Math.round(img.width * scale);
+      const newH = Math.round(img.height * scale);
+      const padX = Math.floor((modelSize - newW) / 2);
+      const padY = Math.floor((modelSize - newH) / 2);
+      mctx.drawImage(img, padX, padY, newW, newH);
+      return { canvas: mCanvas, scale, padX, padY, modelW: modelSize, modelH: modelSize };
+    }
 
-        const GAP_PX = cmToPx(1.5);      // espacio entre imágenes
+    function imageDataToCHWFloat32(imageData, modelW, modelH) {
+      const data = imageData.data;
+      const hw = modelW * modelH;
+      const f32 = new Float32Array(3 * hw);
+      for (let i = 0, p = 0; i < hw; i++, p+=4) {
+        f32[i]       = data[p]   / 255.0;
+        f32[i + hw]  = data[p+1] / 255.0;
+        f32[i + 2*hw]= data[p+2] / 255.0;
+      }
+      return f32;
+    }
 
-        let frontImg, backImg;
-
-        function prepare(img, scale150, gray) {
-            /* if (gray) {
-                const g = new fabric.Image.filters.Grayscale();
-                img.filters = [g];
-                img.applyFilters();
-            } */
-            if (img.height > img.width) img.set({ angle: -90 });
-
-            img.set({
-                originX: 'center',
-                originY: 'center',
-                selectable: true,
-                hasControls: true
-            });
-
-            const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-
-
-            const targetWidth = scale150 ? CARD_W_REAL * 1.5 * (isTouchDevice ? 9 / 8 : 1) : CARD_W_REAL * (isTouchDevice ? 9 / 8 : 1);
-            img.scaleToWidth(targetWidth);
-
-
-
-            img.setCoords();
-            return img;
+    function createCoordMapper(preproc) {
+      return function mapCoord(x, y, coordsAreModelSpace) {
+        let xOrig = x, yOrig = y;
+        if (coordsAreModelSpace) {
+          xOrig = (x - preproc.padX) / preproc.scale;
+          yOrig = (y - preproc.padY) / preproc.scale;
         }
+        return [xOrig, yOrig];
+      };
+    }
 
-        function placeBoth() {
-            if (!frontImg || !backImg) return;
+    function estimateTopEdgeAngleFromKpts(kpts) {
+      const sorted = kpts.slice().sort((a,b) => a.y - b.y);
+      const top2 = sorted.slice(0,2);
+      if (top2.length < 2) return 0;
+      let p1 = top2[0], p2 = top2[1];
+      if (p2.x < p1.x) { [p1, p2] = [p2, p1]; }
+      return Math.atan2(p2.y - p1.y, p2.x - p1.x);
+    }
 
-            const h1 = frontImg.getScaledHeight();
-            const h2 = backImg.getScaledHeight();
-            const total = h1 + GAP_PX + h2;
+    function rotateCanvas(srcCanvas, theta) {
+      const w = srcCanvas.width, h = srcCanvas.height;
+      const cos = Math.cos(theta), sin = Math.sin(theta);
+      const rotW = Math.ceil(Math.abs(w*cos) + Math.abs(h*sin));
+      const rotH = Math.ceil(Math.abs(w*sin) + Math.abs(h*cos));
+      const out = document.createElement('canvas');
+      out.width = rotW; out.height = rotH;
+      const rctx = out.getContext('2d');
+      rctx.translate(rotW/2, rotH/2);
+      rctx.rotate(theta);
+      rctx.drawImage(srcCanvas, -w/2, -h/2);
+      rctx.setTransform(1,0,0,1,0,0);
+      return out;
+    }
 
-            const cx = canvas.width / 2;
-            const startY = (canvas.height - total) / 2;
+    function cropRotateTight(img, kpts, padPx = 0) {
+      const xs = kpts.map(p => p.x);
+      const ys = kpts.map(p => p.y);
+      const minX = Math.max(0, Math.floor(Math.min(...xs) - padPx));
+      const minY = Math.max(0, Math.floor(Math.min(...ys) - padPx));
+      const maxX = Math.min(img.width, Math.ceil(Math.max(...xs) + padPx));
+      const maxY = Math.min(img.height, Math.ceil(Math.max(...ys) + padPx));
+      const srcW = Math.max(1, maxX - minX);
+      const srcH = Math.max(1, maxY - minY);
+      // Canvas con el recorte inicial
+      const cropped = document.createElement('canvas');
+      cropped.width = srcW; cropped.height = srcH;
+      const cctx = cropped.getContext('2d');
+      cctx.drawImage(img, minX, minY, srcW, srcH, 0, 0, srcW, srcH);
+      // Puntos relativos
+      const rel = kpts.map(p => ({ x: p.x - minX, y: p.y - minY }));
+      // Calcular ángulo de rotación
+      const angle = estimateTopEdgeAngleFromKpts(rel);
+      const theta = -angle;
+      // Rotar el canvas recortado
+      const rotated = rotateCanvas(cropped, theta);
+      // Ajustar coordenadas de puntos tras rotación
+      const cx = srcW/2, cy = srcH/2;
+      const newCx = rotated.width/2, newCy = rotated.height/2;
+      const cos = Math.cos(theta), sin = Math.sin(theta);
+      const rotatedKpts = rel.map(p => {
+        const dx = p.x - cx, dy = p.y - cy;
+        return {
+          x: dx * cos - dy * sin + newCx,
+          y: dx * sin + dy * cos + newCy
+        };
+      });
+      // Recortar el canvas rotado al tamaño de los puntos
+      const rxMin = Math.max(0, Math.floor(Math.min(...rotatedKpts.map(p => p.x))));
+      const ryMin = Math.max(0, Math.floor(Math.min(...rotatedKpts.map(p => p.y))));
+      const rxMax = Math.min(rotated.width, Math.ceil(Math.max(...rotatedKpts.map(p => p.x))));
+      const ryMax = Math.min(rotated.height, Math.ceil(Math.max(...rotatedKpts.map(p => p.y))));
+      const finalW = Math.max(1, rxMax - rxMin);
+      const finalH = Math.max(1, ryMax - ryMin);
+      const out = document.createElement('canvas');
+      out.width = finalW; out.height = finalH;
+      const outCtx = out.getContext('2d');
+      outCtx.drawImage(rotated, rxMin, ryMin, finalW, finalH, 0, 0, finalW, finalH);
+      return out;
+    }
 
-            frontImg.set({ left: cx, top: startY + h1 / 2 });
-            backImg.set({ left: cx, top: startY + h1 + GAP_PX + h2 / 2 });
-
-            frontImg.setCoords();
-            backImg.setCoords();
-            canvas.renderAll();
+    // Función asíncrona para procesar y recortar la imagen si es necesario
+    async function processImage(file, isFront) {
+      const scale150 = document.getElementById('scale150').checked;
+      const gray = document.getElementById('gray').checked;
+      // Leer archivo como DataURL
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      await new Promise(res => reader.onload = res);
+      const img = new Image();
+      img.src = reader.result;
+      await new Promise(res => img.onload = res);
+      // Ejecutar inferencia ONNX solo si el modelo está listo
+      if (onnxSession) {
+        const pre = letterboxToModel(img, MODEL_SIZE);
+        const modelImgData = pre.canvas.getContext('2d').getImageData(0, 0, MODEL_SIZE, MODEL_SIZE);
+        const inputData = imageDataToCHWFloat32(modelImgData, MODEL_SIZE, MODEL_SIZE);
+        const tensor = new ort.Tensor('float32', inputData, [1, 3, MODEL_SIZE, MODEL_SIZE]);
+        const feeds = {};
+        // Determinar nombre de entrada (se asume 'images' si no hay nombre explícito)
+        const inputName = onnxSession.inputNames ? onnxSession.inputNames[0] : (onnxSession.inputMetadata ? Object.keys(onnxSession.inputMetadata)[0] : 'images');
+        feeds[inputName] = tensor;
+        let results = null;
+        try {
+          results = await onnxSession.run(feeds);
+        } catch (err) {
+          console.error('Error al inferir ONNX:', err);
         }
-
-        function loadImage(file, isFront) {
-            const reader = new FileReader();
-            reader.onload = e => {
-                fabric.Image.fromURL(e.target.result, img => {
-                    const scale150 = document.getElementById('scale150').checked;
-                    const gray = document.getElementById('gray').checked;
-                    img = prepare(img, scale150, gray);
-
-                    if (isFront) {
-                        if (frontImg) canvas.remove(frontImg);
-                        frontImg = img;
-                    } else {
-                        if (backImg) canvas.remove(backImg);
-                        backImg = img;
-                    }
-
-                    canvas.add(img);
-                    placeBoth();
-                });
-            };
-            reader.readAsDataURL(file);
+        if (results) {
+          // Obtener tensor de salida (se asume el primero)
+          const outKey = onnxSession.outputNames ? onnxSession.outputNames[0] : Object.keys(results)[0];
+          const outTensor = results[outKey];
+          if (outTensor && outTensor.data) {
+            const outData = outTensor.data;
+            const [bs, maxDet, D] = outTensor.dims;
+            // Determinar número de puntos clave (perKP)
+            let perKP = null;
+            if ((D - 6) % 2 === 0) perKP = 2;
+            else if ((D - 6) % 3 === 0) perKP = 3;
+            else perKP = 2;
+            const K = Math.floor((D - 6) / perKP);
+            // Verificar espacio de coordenadas
+            let maxCoord = 0;
+            for (let v of outData) {
+              if (typeof v === 'number' && !isNaN(v) && v > maxCoord) maxCoord = v;
+            }
+            const coordsAreModelSpace = (maxCoord <= (MODEL_SIZE + 1));
+            const mapper = createCoordMapper(pre);
+            // Recolectar detecciones válidas
+            const dets = [];
+            const scoreThreshold = 0.5; // umbral fijo
+            for (let d = 0; d < maxDet; d++) {
+              const base = d * D;
+              const score = outData[base + 4];
+              if (!score || score <= 0 || score < scoreThreshold) continue;
+              // Obtener keypoints
+              const kpts = [];
+              for (let k = 0; k < K; k++) {
+                const kx = outData[base + 6 + perKP*k];
+                const ky = outData[base + 6 + perKP*k + 1];
+                const [px, py] = mapper(kx, ky, coordsAreModelSpace);
+                kpts.push({ x: px, y: py });
+              }
+              dets.push({ score, kpts });
+            }
+            // Si hay detección(es), usar la de mayor puntaje
+            if (dets.length > 0) {
+              dets.sort((a, b) => b.score - a.score);
+              const best = dets[0];
+              const croppedCanvas = cropRotateTight(img, best.kpts, 0);
+              // Convertir el canvas recortado a DataURL e insertarlo
+              fabric.Image.fromURL(croppedCanvas.toDataURL(), imgObj => {
+                imgObj = prepare(imgObj, scale150, gray);
+                if (isFront) {
+                  if (frontImg) canvas.remove(frontImg);
+                  frontImg = imgObj;
+                } else {
+                  if (backImg) canvas.remove(backImg);
+                  backImg = imgObj;
+                }
+                canvas.add(imgObj);
+                placeBoth();
+              });
+              return;
+            }
+          }
         }
+      }
+      // Si no hay modelo o no se detectó nada, usar la imagen original
+      fabric.Image.fromURL(reader.result, imgObj => {
+        imgObj = prepare(imgObj, scale150, gray);
+        if (isFront) {
+          if (frontImg) canvas.remove(frontImg);
+          frontImg = imgObj;
+        } else {
+          if (backImg) canvas.remove(backImg);
+          backImg = imgObj;
+        }
+        canvas.add(imgObj);
+        placeBoth();
+      });
+    }
 
-        document.getElementById('frontInput').addEventListener('change', e => {
-            if (e.target.files[0]) loadImage(e.target.files[0], true);
+    // Escuchar cambios en los inputs de archivo
+    document.getElementById('frontInput').addEventListener('change', e => {
+      if (e.target.files[0]) {
+        if (document.getElementById('cropCheckbox').checked) {
+          processImage(e.target.files[0], true);
+        } else {
+          loadImage(e.target.files[0], true);
+        }
+      }
+    });
+    document.getElementById('backInput').addEventListener('change', e => {
+      if (e.target.files[0]) {
+        if (document.getElementById('cropCheckbox').checked) {
+          processImage(e.target.files[0], false);
+        } else {
+          loadImage(e.target.files[0], false);
+        }
+      }
+    });
+
+    // Función original para cargar imagen sin recorte
+    function loadImage(file, isFront) {
+      const reader = new FileReader();
+      reader.onload = e => {
+        fabric.Image.fromURL(e.target.result, imgObj => {
+          const scale150 = document.getElementById('scale150').checked;
+          const gray = document.getElementById('gray').checked;
+          imgObj = prepare(imgObj, scale150, gray);
+          if (isFront) {
+            if (frontImg) canvas.remove(frontImg);
+            frontImg = imgObj;
+          } else {
+            if (backImg) canvas.remove(backImg);
+            backImg = imgObj;
+          }
+          canvas.add(imgObj);
+          placeBoth();
         });
-
-        document.getElementById('backInput').addEventListener('change', e => {
-            if (e.target.files[0]) loadImage(e.target.files[0], false);
-        });
-
-
-
-
-
-    </script>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-    <script src="./js/print.js"></script>
+      };
+      reader.readAsDataURL(file);
+    }
+  </script>
+  <script src="./js/print.js"></script>
 </body>
-
-</html>>
+</html>
