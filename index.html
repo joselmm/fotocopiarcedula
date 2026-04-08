@@ -39,15 +39,16 @@
     const GAP_PX = cmToPx(1.5);
     let frontImg, backImg;
     let onnxSession = null;
-    const MODEL_PATH = 'models/mejor hasta ahora.onnx';
+    const MODEL_PATH = 'models/best.onnx';
     const MODEL_SIZE = 1024;
 
     ort.InferenceSession.create(MODEL_PATH).then(sess => {
       onnxSession = sess;
       console.log('ONNX model loaded');
-    }).catch(err => console.error('Error loading ONNX:', err));
+    }).catch(err => console.error('Error:', err));
 
     function prepare(img, scale150, gray) {
+      if (img.height > img.width) img.set({ angle: -90 });
       img.set({ originX: 'center', originY: 'center', selectable: true, hasControls: true });
       const targetWidth = scale150 ? CARD_W_REAL * 1.5 : CARD_W_REAL;
       img.scaleToWidth(targetWidth);
@@ -77,80 +78,65 @@
       const mctx = mCanvas.getContext('2d');
       mctx.fillStyle = 'rgb(114,114,114)'; mctx.fillRect(0,0,modelSize,modelSize);
       const scale = Math.min(modelSize / img.width, modelSize / img.height);
-      const newW = Math.round(img.width * scale);
-      const newH = Math.round(img.height * scale);
-      const padX = (modelSize - newW) / 2;
-      const padY = (modelSize - newH) / 2;
+      const newW = Math.round(img.width * scale), newH = Math.round(img.height * scale);
+      const padX = (modelSize - newW) / 2, padY = (modelSize - newH) / 2;
       mctx.drawImage(img, padX, padY, newW, newH);
       return { canvas: mCanvas, scale, padX, padY };
     }
 
-    function imageDataToCHWFloat32(imageData, modelW, modelH) {
-      const data = imageData.data;
-      const f32 = new Float32Array(3 * modelW * modelH);
-      for (let i = 0, p = 0; i < modelW * modelH; i++, p+=4) {
-        f32[i] = data[p] / 255.0;
-        f32[i + modelW * modelH] = data[p+1] / 255.0;
-        f32[i + 2 * modelW * modelH] = data[p+2] / 255.0;
+    function imageDataToCHWFloat32(imageData, w, h) {
+      const data = imageData.data, f32 = new Float32Array(3 * w * h);
+      for (let i = 0, p = 0; i < w * h; i++, p+=4) {
+        f32[i] = data[p]/255; f32[i+w*h] = data[p+1]/255; f32[i+2*w*h] = data[p+2]/255;
       }
       return f32;
     }
 
-    // --- FUNCIÓN CORREGIDA: AHORA SÍ ENDEREZA USANDO TRIÁNGULOS ---
-    function perspectiveWarp(img, kpts) {
+    // MEJORA: Promedia el ángulo de los bordes superior e inferior para más precisión
+    function estimateTopEdgeAngleFromKpts(kpts) {
+      const sortedY = [...kpts].sort((a,b) => a.y - b.y);
+      const top = sortedY.slice(0,2).sort((a,b) => a.x - b.x);
+      const bot = sortedY.slice(2,4).sort((a,b) => a.x - b.x);
+      
+      const angleTop = Math.atan2(top[1].y - top[0].y, top[1].x - top[0].x);
+      const angleBot = Math.atan2(bot[1].y - bot[0].y, bot[1].x - bot[0].x);
+      
+      return (angleTop + angleBot) / 2; // Promedio para estabilizar
+    }
+
+    function rotateCanvas(srcCanvas, theta) {
+      const w = srcCanvas.width, h = srcCanvas.height;
+      const cos = Math.abs(Math.cos(theta)), sin = Math.abs(Math.sin(theta));
+      const rotW = w * cos + h * sin, rotH = w * sin + h * cos;
       const out = document.createElement('canvas');
-      const w = 856, h = 540; // Tamaño estándar ID-1
-      out.width = w; out.height = h;
+      out.width = rotW; out.height = rotH;
       const ctx = out.getContext('2d');
-
-      // 1. Identificar esquinas TL, TR, BR, BL
-      const sortedY = [...kpts].sort((a, b) => a.y - b.y);
-      const top = sortedY.slice(0, 2).sort((a, b) => a.x - b.x);
-      const bot = sortedY.slice(2, 4).sort((a, b) => a.x - b.x);
-      const pts = { tl: top[0], tr: top[1], bl: bot[0], br: bot[1] };
-
-      // 2. Función interna para dibujar un triángulo deformado
-      // Esto simula la homografía de Python sin librerías externas
-      function drawTriangle(p0, p1, p2, t0, t1, t2) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(t0.x, t0.y);
-        ctx.lineTo(t1.x, t1.y);
-        ctx.lineTo(t2.x, t2.y);
-        ctx.closePath();
-        ctx.clip();
-
-        const x0 = t0.x, y0 = t0.y, x1 = t1.x, y1 = t1.y, x2 = t2.x, y2 = t2.y;
-        const u0 = p0.x, v0 = p0.y, u1 = p1.x, v1 = p1.y, u2 = p2.x, v2 = p2.y;
-
-        const det = u0 * (v1 - v2) + u1 * (v2 - v0) + u2 * (v0 - v1);
-        const a = (x0 * (v1 - v2) + x1 * (v2 - v0) + x2 * (v0 - v1)) / det;
-        const b = (v0 * (x1 - x2) + v1 * (x2 - x0) + v2 * (x0 - x1)) / det;
-        const c = (u0 * (x1 * v2 - x2 * v1) + u1 * (x2 * v0 - x0 * v2) + u2 * (x0 * v1 - x1 * v0)) / det;
-        const d = (y0 * (v1 - v2) + y1 * (v2 - v0) + y2 * (v0 - v1)) / det;
-        const e = (v0 * (y1 - y2) + v1 * (y2 - y0) + v2 * (y0 - y1)) / det;
-        const f = (u0 * (y1 * v2 - y2 * v1) + u1 * (y2 * v0 - x0 * v2) + u2 * (y0 * v1 - y1 * v0)) / det;
-
-        ctx.transform(a, d, b, e, c, f);
-        ctx.drawImage(img, 0, 0);
-        ctx.restore();
-      }
-
-      // 3. Mapear los dos triángulos que forman la cédula
-      // Triángulo 1: Superior Izquierdo
-      drawTriangle(pts.tl, pts.tr, pts.bl, {x:0,y:0}, {x:w,y:0}, {x:0,y:h});
-      // Triángulo 2: Inferior Derecho
-      drawTriangle(pts.br, pts.tr, pts.bl, {x:w,y:h}, {x:w,y:0}, {x:0,y:h});
-
+      ctx.translate(rotW/2, rotH/2); ctx.rotate(theta);
+      ctx.drawImage(srcCanvas, -w/2, -h/2);
       return out;
+    }
+
+    function cropRotateTight(img, kpts) {
+      const xs = kpts.map(p => p.x), ys = kpts.map(p => p.y);
+      const minX = Math.min(...xs), minY = Math.min(...ys), maxX = Math.max(...xs), maxY = Math.max(...ys);
+      const sw = maxX - minX, sh = maxY - minY;
+      
+      const cropped = document.createElement('canvas');
+      cropped.width = sw; cropped.height = sh;
+      cropped.getContext('2d').drawImage(img, minX, minY, sw, sh, 0, 0, sw, sh);
+      
+      const theta = -estimateTopEdgeAngleFromKpts(kpts.map(p => ({x: p.x - minX, y: p.y - minY})));
+      const rotated = rotateCanvas(cropped, theta);
+      
+      // Recorte final para quitar bordes negros tras rotar
+      return rotated; 
     }
 
     async function processImage(file, isFront) {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       await new Promise(res => reader.onload = res);
-      const img = new Image();
-      img.src = reader.result;
+      const img = new Image(); img.src = reader.result;
       await new Promise(res => img.onload = res);
 
       if (onnxSession && document.getElementById('cropCheckbox').checked) {
@@ -167,17 +153,13 @@
             maxScore = score;
             best = [];
             for (let k=0; k<4; k++) {
-              best.push({ 
-                x: (outData[d*D+6+2*k] - pre.padX) / pre.scale, 
-                y: (outData[d*D+7+2*k] - pre.padY) / pre.scale 
-              });
+              best.push({ x: (outData[d*D+6+2*k] - pre.padX)/pre.scale, y: (outData[d*D+7+2*k] - pre.padY)/pre.scale });
             }
           }
         }
-
         if (best) {
-          const warped = perspectiveWarp(img, best);
-          fabric.Image.fromURL(warped.toDataURL(), obj => {
+          const finalCanvas = cropRotateTight(img, best);
+          fabric.Image.fromURL(finalCanvas.toDataURL(), obj => {
             obj = prepare(obj, document.getElementById('scale150').checked, document.getElementById('gray').checked);
             if (isFront) { if(frontImg) canvas.remove(frontImg); frontImg = obj; }
             else { if(backImg) canvas.remove(backImg); backImg = obj; }
@@ -186,7 +168,7 @@
           return;
         }
       }
-      
+      // Fallback si no hay detección
       fabric.Image.fromURL(reader.result, obj => {
         obj = prepare(obj, document.getElementById('scale150').checked, document.getElementById('gray').checked);
         if (isFront) { if(frontImg) canvas.remove(frontImg); frontImg = obj; }
@@ -198,8 +180,6 @@
     document.getElementById('frontInput').onchange = e => e.target.files[0] && processImage(e.target.files[0], true);
     document.getElementById('backInput').onchange = e => e.target.files[0] && processImage(e.target.files[0], false);
     document.getElementById('printBtn').onclick = () => window.print();
-
-    console.log("Codigo 12:52")
   </script>
 </body>
 </html>
