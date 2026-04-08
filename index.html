@@ -4,16 +4,57 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+
   <title>Fotocopia Opcional</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #f5f6fa; margin: 0; padding: 0; }
-    .toolbar { background: #2f3640; color: white; padding: 10px; display: flex; gap: 20px; align-items: center; justify-content: center; }
-    .toolbar label { display: flex; align-items: center; gap: 5px; font-size: 14px; }
-    .root { display: flex; justify-content: center; margin-top: 10px; }
-    canvas { border: 1px solid #ccc; }
-    button { background: #44bd32; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px; transition: background 0.2s; }
-    button:hover { background: #4cd137; }
-    #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0); z-index: 10; pointer-events: none; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f6fa;
+      margin: 0; padding: 0;
+    }
+    .toolbar {
+      background: #2f3640;
+      color: white;
+      padding: 10px;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      justify-content: center;
+    }
+    .toolbar label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 14px;
+    }
+    .root {
+      display: flex;
+      justify-content: center;
+      margin-top: 10px;
+    }
+    canvas {
+      border: 1px solid #ccc;
+    }
+    button {
+      background: #44bd32;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #4cd137;
+    }
+    #overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(255, 255, 255, 0);
+      z-index: 10; /* por encima del canvas */
+    }
   </style>
   <link rel="shortcut icon" href="./favicon.png" type="image/x-icon">
 </head>
@@ -42,13 +83,15 @@
     const GAP_PX = cmToPx(1.5);
     let frontImg, backImg;
     let onnxSession = null;
-    const MODEL_PATH = 'models/best.onnx';
+    const MODEL_PATH = 'models/mejor hasta ahora.onnx';
     const MODEL_SIZE = 1024;
 
     ort.InferenceSession.create(MODEL_PATH).then(sess => {
       onnxSession = sess;
       console.log('ONNX model loaded');
-    }).catch(err => console.error('Error loading ONNX model:', err));
+    }).catch(err => {
+      console.error('Error loading ONNX model:', err);
+    });
 
     function prepare(img, scale150, gray) {
       img.set({ originX: 'center', originY: 'center', selectable: true, hasControls: true });
@@ -58,6 +101,7 @@
         : CARD_W_REAL * (isTouchDevice ? 9/8 : 1);
       img.scaleToWidth(targetWidth);
 
+      // Aplicar filtro gris si está activo
       if (gray) {
         img.filters.push(new fabric.Image.filters.Grayscale());
         img.applyFilters();
@@ -100,9 +144,9 @@
       const hw = modelW * modelH;
       const f32 = new Float32Array(3 * hw);
       for (let i = 0, p = 0; i < hw; i++, p+=4) {
-        f32[i] = data[p] / 255.0;
-        f32[i + hw] = data[p+1] / 255.0;
-        f32[i + 2*hw] = data[p+2] / 255.0;
+        f32[i]       = data[p]   / 255.0;
+        f32[i + hw]  = data[p+1] / 255.0;
+        f32[i + 2*hw]= data[p+2] / 255.0;
       }
       return f32;
     }
@@ -115,7 +159,7 @@
       };
     }
 
-    // Simplificado para que no gire de forma impredecible
+    // Lógica de rotación y enderezado corregida
     function cropRotateTight(img, kpts, padPx = 10) {
       const xs = kpts.map(p => p.x);
       const ys = kpts.map(p => p.y);
@@ -131,7 +175,7 @@
       const octx = out.getContext('2d');
       octx.drawImage(img, minX, minY, srcW, srcH, 0, 0, srcW, srcH);
       
-      // Solo giramos 90 grados si el recorte quedó vertical
+      // ENDEREZADO SIMPLE: Si es más alta que ancha, la acostamos 90 grados
       if (srcH > srcW) {
         const rot = document.createElement('canvas');
         rot.width = srcH; rot.height = srcW;
@@ -187,9 +231,15 @@
           const croppedCanvas = cropRotateTight(img, bestDet);
           fabric.Image.fromURL(croppedCanvas.toDataURL(), imgObj => {
             imgObj = prepare(imgObj, scale150, gray);
-            if (isFront) { if (frontImg) canvas.remove(frontImg); frontImg = imgObj; }
-            else { if (backImg) canvas.remove(backImg); backImg = imgObj; }
-            canvas.add(imgObj); placeBoth();
+            if (isFront) {
+              if (frontImg) canvas.remove(frontImg);
+              frontImg = imgObj;
+            } else {
+              if (backImg) canvas.remove(backImg);
+              backImg = imgObj;
+            }
+            canvas.add(imgObj);
+            placeBoth();
           });
           return;
         }
@@ -202,9 +252,15 @@
       reader.onload = e => {
         fabric.Image.fromURL(e.target.result, imgObj => {
           imgObj = prepare(imgObj, document.getElementById('scale150').checked, document.getElementById('gray').checked);
-          if (isFront) { if (frontImg) canvas.remove(frontImg); frontImg = imgObj; }
-          else { if (backImg) canvas.remove(backImg); backImg = imgObj; }
-          canvas.add(imgObj); placeBoth();
+          if (isFront) {
+            if (frontImg) canvas.remove(frontImg);
+            frontImg = imgObj;
+          } else {
+            if (backImg) canvas.remove(backImg);
+            backImg = imgObj;
+          }
+          canvas.add(imgObj);
+          placeBoth();
         });
       };
       reader.readAsDataURL(file);
@@ -216,8 +272,12 @@
     document.getElementById('backInput').addEventListener('change', e => {
       if (e.target.files[0]) processImage(e.target.files[0], false);
     });
-    document.getElementById('printBtn').onclick = () => window.print();
-    console.log("codigo 12:37")
+
+    document.getElementById('printBtn').addEventListener('click', () => {
+      window.print();
+    });
+
+    console.log("codigo 12:41")
   </script>
 </body>
 </html>
