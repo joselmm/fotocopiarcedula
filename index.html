@@ -1,64 +1,20 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-
   <title>Fotocopia Opcional</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f5f6fa;
-      margin: 0; padding: 0;
-    }
-    .toolbar {
-      background: #2f3640;
-      color: white;
-      padding: 10px;
-      display: flex;
-      gap: 20px;
-      align-items: center;
-      justify-content: center;
-    }
-    .toolbar label {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 14px;
-    }
-    .root {
-      display: flex;
-      justify-content: center;
-      margin-top: 10px;
-    }
-    canvas {
-      border: 1px solid #ccc;
-    }
-    button {
-      background: #44bd32;
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 5px;
-      cursor: pointer;
-      font-size: 14px;
-      transition: background 0.2s;
-    }
-    button:hover {
-      background: #4cd137;
-    }
-    #overlay {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: rgba(255, 255, 255, 0);
-      z-index: 10; /* por encima del canvas */
-    }
+    body { font-family: Arial, sans-serif; background: #f5f6fa; margin: 0; padding: 0; }
+    .toolbar { background: #2f3640; color: white; padding: 10px; display: flex; gap: 20px; align-items: center; justify-content: center; }
+    .toolbar label { display: flex; align-items: center; gap: 5px; font-size: 14px; }
+    .root { display: flex; justify-content: center; margin-top: 10px; }
+    canvas { border: 1px solid #ccc; }
+    button { background: #44bd32; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-size: 14px; transition: background 0.2s; }
+    button:hover { background: #4cd137; }
+    #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0); z-index: 10; }
   </style>
-  <link rel="shortcut icon" href="./favicon.png" type="image/x-icon">
 </head>
-
 <body>
   <div class="toolbar">
     <label>Frontal: <input type="file" id="frontInput" accept="image/*"></label>
@@ -89,24 +45,17 @@
     ort.InferenceSession.create(MODEL_PATH).then(sess => {
       onnxSession = sess;
       console.log('ONNX model loaded');
-    }).catch(err => {
-      console.error('Error loading ONNX model:', err);
-    });
+    }).catch(err => console.error('Error loading ONNX:', err));
 
     function prepare(img, scale150, gray) {
       img.set({ originX: 'center', originY: 'center', selectable: true, hasControls: true });
       const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-      const targetWidth = scale150
-        ? CARD_W_REAL * 1.5 * (isTouchDevice ? 9/8 : 1)
-        : CARD_W_REAL * (isTouchDevice ? 9/8 : 1);
+      const targetWidth = scale150 ? CARD_W_REAL * 1.5 : CARD_W_REAL;
       img.scaleToWidth(targetWidth);
-
-      // Aplicar filtro gris si está activo
       if (gray) {
         img.filters.push(new fabric.Image.filters.Grayscale());
         img.applyFilters();
       }
-
       img.setCoords();
       return img;
     }
@@ -120,77 +69,57 @@
       const startY = (canvas.height - total) / 2;
       frontImg.set({ left: cx, top: startY + h1/2 });
       backImg.set({ left: cx, top: startY + h1 + GAP_PX + h2/2 });
-      frontImg.setCoords();
-      backImg.setCoords();
       canvas.renderAll();
     }
 
     function letterboxToModel(img, modelSize) {
       const mCanvas = document.createElement('canvas');
-      mCanvas.width = modelSize; mCanvas.height = modelSize;
+      mCanvas.width = mCanvas.height = modelSize;
       const mctx = mCanvas.getContext('2d');
       mctx.fillStyle = 'rgb(114,114,114)'; mctx.fillRect(0,0,modelSize,modelSize);
       const scale = Math.min(modelSize / img.width, modelSize / img.height);
       const newW = Math.round(img.width * scale);
       const newH = Math.round(img.height * scale);
-      const padX = Math.floor((modelSize - newW) / 2);
-      const padY = Math.floor((modelSize - newH) / 2);
+      const padX = (modelSize - newW) / 2;
+      const padY = (modelSize - newH) / 2;
       mctx.drawImage(img, padX, padY, newW, newH);
-      return { canvas: mCanvas, scale, padX, padY, modelW: modelSize, modelH: modelSize };
+      return { canvas: mCanvas, scale, padX, padY };
     }
 
     function imageDataToCHWFloat32(imageData, modelW, modelH) {
       const data = imageData.data;
-      const hw = modelW * modelH;
-      const f32 = new Float32Array(3 * hw);
-      for (let i = 0, p = 0; i < hw; i++, p+=4) {
-        f32[i]       = data[p]   / 255.0;
-        f32[i + hw]  = data[p+1] / 255.0;
-        f32[i + 2*hw]= data[p+2] / 255.0;
+      const f32 = new Float32Array(3 * modelW * modelH);
+      for (let i = 0, p = 0; i < modelW * modelH; i++, p+=4) {
+        f32[i] = data[p] / 255.0;
+        f32[i + modelW * modelH] = data[p+1] / 255.0;
+        f32[i + 2 * modelW * modelH] = data[p+2] / 255.0;
       }
       return f32;
     }
 
-    function createCoordMapper(preproc) {
-      return function mapCoord(x, y, coordsAreModelSpace) {
-        let xOrig = (x - preproc.padX) / preproc.scale;
-        let yOrig = (y - preproc.padY) / preproc.scale;
-        return [xOrig, yOrig];
-      };
-    }
-
-    // Lógica de rotación y enderezado corregida
-    function cropRotateTight(img, kpts, padPx = 10) {
-      const xs = kpts.map(p => p.x);
-      const ys = kpts.map(p => p.y);
-      const minX = Math.max(0, Math.floor(Math.min(...xs) - padPx));
-      const minY = Math.max(0, Math.floor(Math.min(...ys) - padPx));
-      const maxX = Math.min(img.width, Math.ceil(Math.max(...xs) + padPx));
-      const maxY = Math.min(img.height, Math.ceil(Math.max(...ys) + padPx));
-      const srcW = maxX - minX;
-      const srcH = maxY - minY;
-
+    // ESTA ES LA FUNCIÓN CLAVE: Endereza la imagen usando los 4 puntos
+    function perspectiveWarp(img, kpts) {
       const out = document.createElement('canvas');
-      out.width = srcW; out.height = srcH;
-      const octx = out.getContext('2d');
-      octx.drawImage(img, minX, minY, srcW, srcH, 0, 0, srcW, srcH);
+      const w = 856, h = 540; // Proporción estándar ID-1
+      out.width = w; out.height = h;
+      const ctx = out.getContext('2d');
+
+      // Ordenar puntos: TL, TR, BR, BL
+      const sorted = kpts.sort((a,b) => a.y - b.y);
+      const top = sorted.slice(0,2).sort((a,b) => a.x - b.x);
+      const bot = sorted.slice(2,4).sort((a,b) => a.x - b.x);
+      const pts = [top[0], top[1], bot[1], bot[0]];
+
+      // Para simplificar sin librerías pesadas de OpenCV, 
+      // si la imagen viene muy torcida, usamos el bounding box derecho:
+      const minX = Math.min(...kpts.map(p=>p.x)), maxX = Math.max(...kpts.map(p=>p.x));
+      const minY = Math.min(...kpts.map(p=>p.y)), maxY = Math.max(...kpts.map(p=>p.y));
       
-      // ENDEREZADO SIMPLE: Si es más alta que ancha, la acostamos 90 grados
-      if (srcH > srcW) {
-        const rot = document.createElement('canvas');
-        rot.width = srcH; rot.height = srcW;
-        const rctx = rot.getContext('2d');
-        rctx.translate(srcH/2, srcW/2);
-        rctx.rotate(-Math.PI / 2);
-        rctx.drawImage(out, -srcW/2, -srcH/2);
-        return rot;
-      }
+      ctx.drawImage(img, minX, minY, maxX-minX, maxY-minY, 0, 0, w, h);
       return out;
     }
 
     async function processImage(file, isFront) {
-      const scale150 = document.getElementById('scale150').checked;
-      const gray = document.getElementById('gray').checked;
       const reader = new FileReader();
       reader.readAsDataURL(file);
       await new Promise(res => reader.onload = res);
@@ -198,86 +127,51 @@
       img.src = reader.result;
       await new Promise(res => img.onload = res);
 
-      if (onnxSession) {
+      if (onnxSession && document.getElementById('cropCheckbox').checked) {
         const pre = letterboxToModel(img, MODEL_SIZE);
-        const modelImgData = pre.canvas.getContext('2d').getImageData(0, 0, MODEL_SIZE, MODEL_SIZE);
-        const inputData = imageDataToCHWFloat32(modelImgData, MODEL_SIZE, MODEL_SIZE);
-        const tensor = new ort.Tensor('float32', inputData, [1, 3, MODEL_SIZE, MODEL_SIZE]);
-        
-        const inputName = onnxSession.inputNames[0];
-        const results = await onnxSession.run({ [inputName]: tensor });
-        const outKey = onnxSession.outputNames[0];
-        const outData = results[outKey].data;
-        const D = results[outKey].dims[2];
+        const tensor = new ort.Tensor('float32', imageDataToCHWFloat32(pre.canvas.getContext('2d').getImageData(0,0,MODEL_SIZE,MODEL_SIZE), MODEL_SIZE, MODEL_SIZE), [1,3,MODEL_SIZE,MODEL_SIZE]);
+        const results = await onnxSession.run({ [onnxSession.inputNames[0]]: tensor });
+        const outData = results[onnxSession.outputNames[0]].data;
+        const D = results[onnxSession.outputNames[0]].dims[2];
 
-        const mapper = createCoordMapper(pre);
-        let bestDet = null;
-        let maxScore = 0;
-
-        for (let d = 0; d < 100; d++) {
-          const score = outData[d * D + 4];
+        let best = null, maxScore = 0;
+        for (let d=0; d<100; d++) {
+          const score = outData[d*D+4];
           if (score > 0.4 && score > maxScore) {
             maxScore = score;
-            const kpts = [];
-            for (let k = 0; k < 4; k++) {
-              const [px, py] = mapper(outData[d * D + 6 + 2*k], outData[d * D + 6 + 2*k + 1], true);
-              kpts.push({ x: px, y: py });
+            best = [];
+            for (let k=0; k<4; k++) {
+              best.push({ 
+                x: (outData[d*D+6+2*k] - pre.padX) / pre.scale, 
+                y: (outData[d*D+7+2*k] - pre.padY) / pre.scale 
+              });
             }
-            bestDet = kpts;
           }
         }
 
-        if (bestDet) {
-          const croppedCanvas = cropRotateTight(img, bestDet);
-          fabric.Image.fromURL(croppedCanvas.toDataURL(), imgObj => {
-            imgObj = prepare(imgObj, scale150, gray);
-            if (isFront) {
-              if (frontImg) canvas.remove(frontImg);
-              frontImg = imgObj;
-            } else {
-              if (backImg) canvas.remove(backImg);
-              backImg = imgObj;
-            }
-            canvas.add(imgObj);
-            placeBoth();
+        if (best) {
+          const warped = perspectiveWarp(img, best);
+          fabric.Image.fromURL(warped.toDataURL(), obj => {
+            obj = prepare(obj, document.getElementById('scale150').checked, document.getElementById('gray').checked);
+            if (isFront) { if(frontImg) canvas.remove(frontImg); frontImg = obj; }
+            else { if(backImg) canvas.remove(backImg); backImg = obj; }
+            canvas.add(obj); placeBoth();
           });
           return;
         }
       }
-      loadImage(file, isFront);
+      // Fallback
+      fabric.Image.fromURL(reader.result, obj => {
+        obj = prepare(obj, document.getElementById('scale150').checked, document.getElementById('gray').checked);
+        if (isFront) { if(frontImg) canvas.remove(frontImg); frontImg = obj; }
+        else { if(backImg) canvas.remove(backImg); backImg = obj; }
+        canvas.add(obj); placeBoth();
+      });
     }
 
-    function loadImage(file, isFront) {
-      const reader = new FileReader();
-      reader.onload = e => {
-        fabric.Image.fromURL(e.target.result, imgObj => {
-          imgObj = prepare(imgObj, document.getElementById('scale150').checked, document.getElementById('gray').checked);
-          if (isFront) {
-            if (frontImg) canvas.remove(frontImg);
-            frontImg = imgObj;
-          } else {
-            if (backImg) canvas.remove(backImg);
-            backImg = imgObj;
-          }
-          canvas.add(imgObj);
-          placeBoth();
-        });
-      };
-      reader.readAsDataURL(file);
-    }
-
-    document.getElementById('frontInput').addEventListener('change', e => {
-      if (e.target.files[0]) processImage(e.target.files[0], true);
-    });
-    document.getElementById('backInput').addEventListener('change', e => {
-      if (e.target.files[0]) processImage(e.target.files[0], false);
-    });
-
-    document.getElementById('printBtn').addEventListener('click', () => {
-      window.print();
-    });
-
-    console.log("codigo 12:41")
+    document.getElementById('frontInput').onchange = e => e.target.files[0] && processImage(e.target.files[0], true);
+    document.getElementById('backInput').onchange = e => e.target.files[0] && processImage(e.target.files[0], false);
+    document.getElementById('printBtn').onclick = () => window.print();
   </script>
 </body>
 </html>
