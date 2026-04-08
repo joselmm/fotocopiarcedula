@@ -49,7 +49,6 @@
 
     function prepare(img, scale150, gray) {
       img.set({ originX: 'center', originY: 'center', selectable: true, hasControls: true });
-      const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
       const targetWidth = scale150 ? CARD_W_REAL * 1.5 : CARD_W_REAL;
       img.scaleToWidth(targetWidth);
       if (gray) {
@@ -97,25 +96,52 @@
       return f32;
     }
 
-    // ESTA ES LA FUNCIÓN CLAVE: Endereza la imagen usando los 4 puntos
+    // --- FUNCIÓN CORREGIDA: AHORA SÍ ENDEREZA USANDO TRIÁNGULOS ---
     function perspectiveWarp(img, kpts) {
       const out = document.createElement('canvas');
-      const w = 856, h = 540; // Proporción estándar ID-1
+      const w = 856, h = 540; // Tamaño estándar ID-1
       out.width = w; out.height = h;
       const ctx = out.getContext('2d');
 
-      // Ordenar puntos: TL, TR, BR, BL
-      const sorted = kpts.sort((a,b) => a.y - b.y);
-      const top = sorted.slice(0,2).sort((a,b) => a.x - b.x);
-      const bot = sorted.slice(2,4).sort((a,b) => a.x - b.x);
-      const pts = [top[0], top[1], bot[1], bot[0]];
+      // 1. Identificar esquinas TL, TR, BR, BL
+      const sortedY = [...kpts].sort((a, b) => a.y - b.y);
+      const top = sortedY.slice(0, 2).sort((a, b) => a.x - b.x);
+      const bot = sortedY.slice(2, 4).sort((a, b) => a.x - b.x);
+      const pts = { tl: top[0], tr: top[1], bl: bot[0], br: bot[1] };
 
-      // Para simplificar sin librerías pesadas de OpenCV, 
-      // si la imagen viene muy torcida, usamos el bounding box derecho:
-      const minX = Math.min(...kpts.map(p=>p.x)), maxX = Math.max(...kpts.map(p=>p.x));
-      const minY = Math.min(...kpts.map(p=>p.y)), maxY = Math.max(...kpts.map(p=>p.y));
-      
-      ctx.drawImage(img, minX, minY, maxX-minX, maxY-minY, 0, 0, w, h);
+      // 2. Función interna para dibujar un triángulo deformado
+      // Esto simula la homografía de Python sin librerías externas
+      function drawTriangle(p0, p1, p2, t0, t1, t2) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(t0.x, t0.y);
+        ctx.lineTo(t1.x, t1.y);
+        ctx.lineTo(t2.x, t2.y);
+        ctx.closePath();
+        ctx.clip();
+
+        const x0 = t0.x, y0 = t0.y, x1 = t1.x, y1 = t1.y, x2 = t2.x, y2 = t2.y;
+        const u0 = p0.x, v0 = p0.y, u1 = p1.x, v1 = p1.y, u2 = p2.x, v2 = p2.y;
+
+        const det = u0 * (v1 - v2) + u1 * (v2 - v0) + u2 * (v0 - v1);
+        const a = (x0 * (v1 - v2) + x1 * (v2 - v0) + x2 * (v0 - v1)) / det;
+        const b = (v0 * (x1 - x2) + v1 * (x2 - x0) + v2 * (x0 - x1)) / det;
+        const c = (u0 * (x1 * v2 - x2 * v1) + u1 * (x2 * v0 - x0 * v2) + u2 * (x0 * v1 - x1 * v0)) / det;
+        const d = (y0 * (v1 - v2) + y1 * (v2 - v0) + y2 * (v0 - v1)) / det;
+        const e = (v0 * (y1 - y2) + v1 * (y2 - y0) + v2 * (y0 - y1)) / det;
+        const f = (u0 * (y1 * v2 - y2 * v1) + u1 * (y2 * v0 - x0 * v2) + u2 * (y0 * v1 - y1 * v0)) / det;
+
+        ctx.transform(a, d, b, e, c, f);
+        ctx.drawImage(img, 0, 0);
+        ctx.restore();
+      }
+
+      // 3. Mapear los dos triángulos que forman la cédula
+      // Triángulo 1: Superior Izquierdo
+      drawTriangle(pts.tl, pts.tr, pts.bl, {x:0,y:0}, {x:w,y:0}, {x:0,y:h});
+      // Triángulo 2: Inferior Derecho
+      drawTriangle(pts.br, pts.tr, pts.bl, {x:w,y:h}, {x:w,y:0}, {x:0,y:h});
+
       return out;
     }
 
@@ -160,7 +186,7 @@
           return;
         }
       }
-      // Fallback
+      
       fabric.Image.fromURL(reader.result, obj => {
         obj = prepare(obj, document.getElementById('scale150').checked, document.getElementById('gray').checked);
         if (isFront) { if(frontImg) canvas.remove(frontImg); frontImg = obj; }
@@ -172,6 +198,8 @@
     document.getElementById('frontInput').onchange = e => e.target.files[0] && processImage(e.target.files[0], true);
     document.getElementById('backInput').onchange = e => e.target.files[0] && processImage(e.target.files[0], false);
     document.getElementById('printBtn').onclick = () => window.print();
+
+    console.log("Codigo 12:52")
   </script>
 </body>
 </html>
